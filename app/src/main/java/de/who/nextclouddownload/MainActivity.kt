@@ -20,7 +20,7 @@ import kotlin.sequences.generateSequence
 data class PropfindEntry(val href: String, val folder: Boolean?)
 
 class PropfindXmlParser {
-
+    
     private val ns: String? = null
 
     @Throws(XmlPullParserException::class, IOException::class)
@@ -34,26 +34,31 @@ class PropfindXmlParser {
         }
     }
 
+    /**
+     * Multistatus ist oberstes Element einer PROPFIND Antwort:
+     */
     @Throws(XmlPullParserException::class, IOException::class)
     private fun readMultistatus(parser: XmlPullParser): Sequence<PropfindEntry> = generateSequence {
         parser.require(XmlPullParser.START_TAG, ns, "d:multistatus")
-
+        var prop : PropfindEntry? = null
         while (parser.next() != XmlPullParser.END_TAG) {
-            if (parser.name == "d:prop") {
-                parser.
+            if (parser.name == "d:response") {
+                prop = readResponse(parser)
             } else {
                 skip(parser)
             }
         }
-        null
+        prop
     }
 
+    /**
+    <d:response><d:href>link</d:href><d:propstat><d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop></d:propstat></d:response>
+     */
     @Throws(XmlPullParserException::class, IOException::class)
     private fun readResponse(parser: XmlPullParser): PropfindEntry? {
         parser.require(XmlPullParser.START_TAG, ns, "d:response")
         var href: String? = null
         var isFolder: Boolean? = null
-        var link: String? = null
         while (parser.next() != XmlPullParser.END_TAG) {
             if (parser.eventType != XmlPullParser.START_TAG) {
                 continue
