@@ -19,106 +19,88 @@ import kotlin.sequences.generateSequence
 
 data class PropfindEntry(val href: String, val folder: Boolean?)
 
-class PropfindXmlParser {
-    
-    private val ns: String? = null
+sealed class XMLElement
+class XMLTagStart(val name : String) : XMLElement()
+class XMLTagEnd(val name : String) : XMLElement()
+class XMLText(val value : String) : XMLElement()
 
-    @Throws(XmlPullParserException::class, IOException::class)
-    fun parse(inputStream: InputStream): Sequence<*> {
-        inputStream.use { inputStream ->
-            val parser: XmlPullParser = Xml.newPullParser()
-            parser.setFeature(XmlPullParser.FEATURE_PROCESS_NAMESPACES, false)
-            parser.setInput(inputStream, null)
-            parser.nextTag()
-            return readMultistatus(parser)
-        }
-    }
 
-    /**
-     * Multistatus ist oberstes Element einer PROPFIND Antwort:
-     */
-    @Throws(XmlPullParserException::class, IOException::class)
-    private fun readMultistatus(parser: XmlPullParser): Sequence<PropfindEntry> = generateSequence {
-        parser.require(XmlPullParser.START_TAG, ns, "d:multistatus")
-        var prop : PropfindEntry? = null
-        while (parser.next() != XmlPullParser.END_TAG) {
-            if (parser.name == "d:response") {
-                prop = readResponse(parser)
-            } else {
-                skip(parser)
-            }
-        }
-        prop
-    }
-
-    /**
-    <d:response><d:href>link</d:href><d:propstat><d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop></d:propstat></d:response>
-     */
-    @Throws(XmlPullParserException::class, IOException::class)
-    private fun readResponse(parser: XmlPullParser): PropfindEntry? {
-        parser.require(XmlPullParser.START_TAG, ns, "d:response")
-        var href: String? = null
-        var isFolder: Boolean? = null
-        while (parser.next() != XmlPullParser.END_TAG) {
-            if (parser.eventType != XmlPullParser.START_TAG) {
-                continue
-            }
-            when (parser.name) {
-                "d:href" -> href = readHref(parser)
-                "d:resourcetype" -> isFolder = readIsFolder(parser)
-                else -> skip(parser)
-            }
-        }
-        if(href == null)null
-        return PropfindEntry(href!!, isFolder)
-    }
-
-    // Processes title tags in the feed.
-    @Throws(IOException::class, XmlPullParserException::class)
-    private fun readIsFolder(parser: XmlPullParser): Boolean {
-        if(parser.isEmptyElementTag || !parser.name.equals("d:resourcetype")) return false
-        parser.next()
-        if(!parser.name.equals("d:collection")) return false
-        parser.next()
-        parser.require(XmlPullParser.END_TAG, ns, "d:resourcetype")
-        return true
-    }
-
-    // Processes title tags in the feed.
-    @Throws(IOException::class, XmlPullParserException::class)
-    private fun readHref(parser: XmlPullParser): String {
-        parser.require(XmlPullParser.START_TAG, ns, "d:href")
-        val title = readText(parser)
-        parser.require(XmlPullParser.END_TAG, ns, "d:href")
-        return title
-    }
-
-    // For the tags title and summary, extracts their text values.
-    @Throws(IOException::class, XmlPullParserException::class)
-    private fun readText(parser: XmlPullParser): String {
-        var result = ""
-        if (parser.next() == XmlPullParser.TEXT) {
-            result = parser.text
-            parser.nextTag()
-        }
-        return result
-    }
-
-    @Throws(XmlPullParserException::class, IOException::class)
-    private fun skip(parser: XmlPullParser) {
-        if (parser.eventType != XmlPullParser.START_TAG) {
-            throw IllegalStateException()
-        }
-        var depth = 1
-        while (depth != 0) {
-            when (parser.next()) {
-                XmlPullParser.END_TAG -> depth--
-                XmlPullParser.START_TAG -> depth++
-            }
-        }
-    }
-
+interface XMLParser
+{
+    fun match(tagName : String) : TagMatcher
 }
+
+
+class TagMatcher(val stream : Sequence<XMLElement>, val tagName : String) : XMLParser {
+    override fun match(tagName : String) : TagMatcher{
+        return TagMatcher(stream, tagName)
+    }
+
+    fun getText() : Sequence<String> =
+        stream.filter{}
+}
+
+/**
+ * propfinds = parser.match("propfind") -> XMLParser
+ * hrefs = parser.match("propfind").match("href").getText() --> Sequence<String>
+ * hrefs = parser.match("propfind").match("resourceType").getText().map
+ * hrefs = propfinds.match("resourcetype").getText()
+ * parser.match("propfind").map{
+ *      val href = it.match("href").map(parser.getText())
+ *      val isFolder it.match(
+ * }
+ */
+class XMLParserInit(val input: Reader) : XMLParser{
+    override fun match(tagName : String) : TagMatcher{
+        return TagMatcher(this, listOf(tagName))
+    }
+
+
+    private fun toSequence () = generateSequence {
+        val i = input.read()
+        if(i == -1){
+            input.close()
+            null
+        }else{
+            i.toChar()
+        }
+    }
+
+    private fun takeTill(char : Char): Int{
+        var i : Int = input.read()
+        while(i != -1 && i.toChar() != char){
+            i = input.read()
+        }
+        if(i == -1)return i
+        return input.read()
+    }
+
+    private fun nextStartTag() : String? {
+        val stream = toSequence()
+        stream.dropWhile{ it != '<'}
+        stream.drop(1)
+
+        val tagName : StringBuilder = java.lang.StringBuilder();
+        stream.takeWhile { it != ' ' }.map { tagName.append(it) }
+        return tagName.toString()
+    }
+
+    private fun tagParse(tagFilter: String,stream: Reader): String?{;
+        val ret : StringBuilder = java.lang.StringBuilder();
+        var i : Int = stream.read()
+        while(i != -1){
+            val c : Char = i.toChar()
+            if(c == '>'){
+                return ret.toString()
+            }
+            ret.append(c)
+            i = stream.read()
+        }
+        return null;
+    }
+}
+
+class XMLParserMatcher()
 
 /**
     Returns every href in the input xml
